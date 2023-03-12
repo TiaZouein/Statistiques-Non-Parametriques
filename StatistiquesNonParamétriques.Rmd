@@ -1,0 +1,1095 @@
+---
+title: "Projet Statistique Non Parametrique"
+author: "Tia ZOUEIN, Maria Jose DOMENZAIN ACEVEDO"
+date: '2023-03-02'
+output:
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE}
+library(ggplot2)
+library(ggcorrplot)
+library(ISLR,quietly = TRUE)
+library(Epi)
+library(aod)
+library(dplyr,quietly=TRUE)
+library("dplyr")
+library(ggplot2,quietly=TRUE)
+library("grid")
+library("gridExtra")
+library("caret")
+library(tidyverse)
+library(nortest)
+library(knitr)
+library("ggfortify")
+library("reshape2")
+library(faraway)
+library(leaps)
+library(stats)
+library(devtools)
+library(test)
+library(robusTest)
+library(Hmisc)
+library(np)
+library(locfit)
+library(tibble)
+library(caret)
+```
+
+Import des données
+```{r}
+data = read.csv("C:/Users/mary_/Documents/UEVE/NP Stat/dataTitanic.csv")
+```
+
+On supprime les deux colones: Cabin et Ticket
+
+```{r}
+data$Cabin = NULL
+data$Ticket = NULL
+```
+
+```{r pressure, echo=FALSE}
+data
+```
+
+On peut supprimer la première colone qui n'est qu'un index
+```{r}
+data <- data[, -1]
+```
+
+Pas toutes nos variables sont numériques
+```{r}
+summary(data)
+```
+Examinons les doublons
+
+```{r}
+### Doublons
+duplicated = which(duplicated(data)) 
+duplicated
+## pas de doublons
+```
+```{r}
+data$Age
+```
+On remarque que la colone age contient des valeurs bizarres comme 317.763.809.500.533. On
+cherche à traiter ces valeurs car elles semblent incorrectes. On considera les valeurs au dessous de 100, car l'age ne peut pas dépasser cette valeur, puis ont supprime les valeurs au-dessus de 100 et on remplace les valeurs manquantes par la médiane au lieu de la moyenne car cette dernière est sensible aux valeurs aberrantes.
+
+```{r}
+data$Age <- as.numeric(gsub("\\.", "", as.character(data$Age))) ## gsub remplace tous les points dans la variable age par une chaîne de caractères vide (""). Ensuite, la fonction as.numeric() convertit la variable age en nombres.
+
+data$Age[data$Age > 100] <- NA ## on remplace les valeurs incorrectes                                                      par des valeurs manquantes
+median_age <- median(data$Age, na.rm = TRUE) ## on calcule la moyenne de la colone
+median_age
+data$Age[is.na(data$Age)] <- median_age ## on remplace les valeurs manquantes par la                                                médiane
+data$Age[data$Age < 0] <- median(data$Age[data$Age>=0])
+data$Age
+```
+
+On Transforme la variable Sex en une variable binaire, nous utilisons la fonction ifelse() pour créer une nouvelle variable binaire "Sexe_binaire" qui prend la valeur 0 si "Sex" est "femme" et 1 si "Sex" est "homme".
+
+```{r}
+data$Sex <- ifelse(data$Sex == "female", 0, 1)
+data$Sex
+```
+
+Examinons la colone Embarked, essayons de la transformer en une variable numérique pour qu'on puisse l'utiliser
+```{r}
+unique(data$Embarked)  ## cette colone contient 3 différents ports d'embarcation qu'a                              pris un passager
+data$Embarked <- ifelse(data$Embarked == "Southampton", 4,
+                       ifelse(data$Embarked == "Cherbourg", 5,
+                              ifelse(data$Embarked == "Queenstown", 6, data$Embarked)))
+data$Embarked <- as.numeric(data$Embarked)
+data$Embarked
+```
+```{r}
+data
+### Toutes nos variables sont numériques maintenant sauf la variable Name qu'on a décidé de ne pas la convertir car elle possèdera plusieurs labels
+data$Name = NULL
+```
+
+On transforme nos données en numériques
+```{r}
+summary(data)
+data
+```
+Les variables semblent etre centrées , réduites, sauf PassengerID.
+
+```{r}
+boxplot(data)
+```
+Notre projet va se cencentrer sur l'étude et l'estimation de la variable Age.
+
+La distribution de la variable continue Age ne semble pas etre symétrique. Du boxplot et du test de shapiro-wilk, on peut confirmer que la distribution de cette variable n'est pas la loi normale.
+```{r}
+boxplot(data$Age)
+```
+
+### Partie I: Tests
+
+#### Tests d'adéquation à une famille de lois
+
+##### Cas continu
+Soit $X$ une variable aléatoire continue. On applique le teste de Shapiro-Wilk pour voir si X suit ou pas une loi Normale. Ici on a pour hypothèses:
+\begin{align*}
+H_{0} &: X \sim N(\mu,\sigma^{2}.)\\
+H_{1} &: X \text{ ne suit pas une loi Normale.}
+\end{align*}
+
+La statistique de test de Shapiro-Wil est donnée par:
+$$W = \dfrac{\left(\sum_{i=1}^{n}a_{i}x_{(i)}\right)^{2}}{\sum_{i=1}^{n}(x_{i}-\bar{x})^{2}}$$
+où
+- $x_{(i)}$ désigne la i-éme statistique d'ordre.
+- $\bar{x}$ est la moyenne de l'échantillon.
+- $(a_{1}, \dots, a_{n}) = \dfrac{m^{T}V^{-1}}{(m^{T}V^{-1}V^{-1}m)^{1/2}}$, où $m=(m_{1},\dots,m_{n})^{T}$ sont les espérances des statistiques d'ordre d'un échantillon de variables i.i.d. et $V$ est la matrice de variance.
+
+```{r}
+shapiro.test(data$Age)
+shapiro.test(data$Fare)
+
+lillie.test(data$Age)
+lillie.test(data$Fare)
+```
+
+On applique ces mêmes tests pour nos variables continues Age et Fare en groupant par la variable Survived.
+
+```{r}
+shapiro.test(data$Age[data$Survived==1])
+shapiro.test(data$Age[data$Survived==0])
+
+shapiro.test(data$Fare[data$Survived==1])
+shapiro.test(data$Fare[data$Survived==0])
+``` 
+On observe que pour les deux cas, groupé et non groupé, pour les deux variables, la valeur p est eloignée de 0.05, ce qui veut dire qu'on rejette l'hyphthèse nulle et on conclut que ni l'Age ni le Fare suivent une loi Normale.
+On applique le test de Lilliefors test pour pour confirmer les resultats précedents. 
+```{r}
+lillie.test(data$Age[data$Survived==1])
+lillie.test(data$Age[data$Survived==0])
+
+lillie.test(data$Fare[data$Survived==1])
+lillie.test(data$Fare[data$Survived==0])
+```
+Et on retrouve des valeurs p très similaires aux précédents.
+
+#### Tests de comparaisons pour des échantillons appariés
+Comme on a trouvé que nos variables continues ne suivent pas une loi Normale, on ne peut pas utiliser le test de Student pour des échantillons appariés. On utilise donc le TLC.
+Ici on a pour hypothèses:
+\begin{align*}
+H_{0} &: E[X0] =  E[X1] \\
+H_{1} &: E[X0] \text{ est différent de }  E[X1]
+\end{align*}
+```{r}
+X1 <- data$Age[data$Survived==1]
+X0 <- data$Age[data$Survived==0]
+n1 <- sum(data$Survived==1) 
+n0 <- sum(data$Survived==0) 
+stat_TX  <- (mean(X0)-mean(X1))/sqrt(var(X0)/n0+var(X1)/n1)
+(pvalue <- 2*(1-pnorm(abs(stat_TX),0,1)))
+
+```
+On admet $H_{0},$ il est possible que $E[X0] =  E[X1].$
+
+```{r}
+Y1 <- data$Fare[data$Survived==1]
+Y0 <- data$Fare[data$Survived==0]
+stat_TY  <- (mean(Y0)-mean(Y1))/sqrt(var(Y0)/n0+var(Y1)/n1)
+(pvalue <- 2*(1-pnorm(abs(stat_TY),0,1)))
+
+```
+Ici, la valeur p est petite donc on rejette $H_{0}$ et on conclut que  $E[Y0] \diff  E[Y1]$ 
+
+#### Test de comparaison des fonctions de répartitions empiriques
+Ici on veut comparer si les fonctions de repartitions sont les mêmes pour Age et Fare selon les deux groupes definis par la variable Survived.
+```{r}
+ks.test(data$Age[data$Survived==1],data$Age[data$Survived==0])
+
+ks.test(data$Fare[data$Survived==1],data$Fare[data$Survived==0])
+```
+
+#### Tests d'indépendance
+On observe la matrice de correlation pour se donner une idée de si les variables sont indépendantes ou pas.
+```{r}
+data$Name = NULL
+corr_mat <- round(cor(data),1)
+  
+# Visualizing the correlation matrix using 
+# square and circle methods
+ggcorrplot(corr_mat, method ="circle")
+```
+
+##### Pour les variables discrètes
+On applique le de Chi au carré aux pairs des variables suivantes:
+- Survived-Pclass 
+- Survived-Sex 
+- Survived-SibSp
+- Survived-Parch
+- Survived-Embarked
+- Pclass-Sex
+- Pclass-SibSp
+- Pclass-Parch
+- Pclass-Embarked
+- Sex-SibSp
+- Sex-Parch
+- Sex-Embarked
+- SibSp-Parch
+- SibSp-Embarked
+- Parch-Embarked
+
+On utilise aussi le test de Fisher lorsque les effectifs théoriques ne sont pas plus grands que 5. Dans ce cadre on l'utilise seulement pour les pairs de variables suivantes:
+- Survived-SibSp
+- Survived-Parch
+- Pclass-SibSp
+- Pclass-Parch
+- Sex-SibSp
+- Sex-Parch
+- SibSp-Parch
+- SibSp-Embarked
+- Parch-Embarked
+
+
+Pour ces deux tets on a que pour deux variables $X$ et $Y$ quelconques,
+\begin{align*}
+H_{0} &: X \text{ et } Y \text{ sont independants.}\\
+H_{1} &: X \text{ et } Y \text{ ne sont pas independants.}
+\end{align*}
+
+La statistique de test est donnée par:
+
+$$T_{n} = \sum_{j = i}^{J}\sum_{k = 1}^{K} \dfrac{\left(N_{jk}-\dfrac{Nj.N.k}{n}\right)^{2}}{\dfrac{Nj.N.k}{n}}$$
+```{r}
+### On utilise chisq.test d'independance pour des variables discretes
+chisq.test(data$Survived,data$Pclass, correct=FALSE)
+chisq.test(data$Survived,data$Pclass, correct=FALSE)$expected
+
+chisq.test(data$Survived,data$Sex, correct=FALSE)
+chisq.test(data$Survived,data$Sex, correct=FALSE)$expected
+
+chisq.test(data$Survived,data$SibSp, correct=FALSE)
+chisq.test(data$Survived,data$SibSp, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$Survived,data$SibSp,simulate.p.value=TRUE) 
+
+chisq.test(data$Survived,data$Parch, correct=FALSE)
+chisq.test(data$Survived,data$Parch, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$Survived,data$Parch,simulate.p.value=TRUE) 
+
+chisq.test(data$Survived,data$Embarked, correct=FALSE)
+chisq.test(data$Survived,data$Embarked, correct=FALSE)$expected
+
+chisq.test(data$Pclass,data$Sex, correct=FALSE)
+chisq.test(data$Pclass,data$Sex, correct=FALSE)$expected
+
+chisq.test(data$Pclass,data$SibSp, correct=FALSE)
+chisq.test(data$Pclass,data$SibSp, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$Survived,data$Parch,simulate.p.value=TRUE) 
+
+chisq.test(data$Pclass,data$Parch, correct=FALSE)
+chisq.test(data$Pclass,data$Parch, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$Pclass,data$Parch,simulate.p.value=TRUE) 
+
+chisq.test(data$Pclass,data$Embarked, correct=FALSE)
+chisq.test(data$Pclass,data$Embarked, correct=FALSE)$expected
+
+chisq.test(data$Sex,data$SibSp, correct=FALSE)
+chisq.test(data$Sex,data$SibSp, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$Sex,data$SibSp,simulate.p.value=TRUE) 
+
+chisq.test(data$Sex,data$Parch, correct=FALSE)
+chisq.test(data$Sex,data$Parch, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$Sex,data$Parch,simulate.p.value=TRUE)
+
+chisq.test(data$Sex,data$Embarked, correct=FALSE)
+chisq.test(data$Sex,data$Embarked, correct=FALSE)$expected
+
+chisq.test(data$SibSp,data$Parch, correct=FALSE)
+chisq.test(data$SibSp,data$Parch, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$SibSp,data$Parch,simulate.p.value=TRUE)
+
+chisq.test(data$SibSp,data$Embarked, correct=FALSE)
+chisq.test(data$SibSp,data$Embarked, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$SibSp,data$Embarked,simulate.p.value=TRUE)
+
+chisq.test(data$Parch,data$Embarked, correct=FALSE)
+chisq.test(data$Parch,data$Embarked, correct=FALSE)$expected #effectifs théoriques pas tous plus grand que 5
+fisher.test(data$Parch,data$Embarked,simulate.p.value=TRUE)
+
+```
+
+On observe que pour la plupart des cas les valeurs p sont largement loins de $0.05$ donc on rejette $H_{0}$ et on conclut que les variables ne sont pas indépendantes. Sauf pour le cas de Pclass et Parch où la valeur p est de $0.231$ pour le test de chi au carrée et $0.2994$ pour le test de Fisher. Dans ce cas on ne rejette pas $H_{0}.$
+
+
+##### Pour les variables continues
+Ensuite on fait le test d'independance pour les seuls deux variables continues de notre base de données: Age et Fare. Pour cela on utilise indeptest, le test de Kolmogorov-Smirnov d'independance.
+Comme pour le cas discret, nos hypothèses de test sont:
+Pour deux variables $X$ et $Y$,
+
+\begin{align*}
+H_{0} &: X \text{ et } Y \text{ sont independants.}\\
+H_{1} &: X \text{ et } Y \text{ ne sont pas independants.}
+\end{align*}
+
+La statistique de test est donnée par:
+$$Tn = \sqrt{n}sup_{s,t \in R}|\dfrac{1}{n}\sum_{i=1} 1_{X_{i}\leq s\cap Y_{i}\leq t}- F_{nX}(s)F_{nY}(t)|.$$
+```{r}
+### On utilise indeptest d'independance pour des variables continues
+indeptest(data$Age,data$Fare,ties.break="random") #test de Kolmogorov Smirnov d'indépendance. 
+```
+On a une valeur p assez petite donc on rejette $H_{0}$ et on conclut que les variables ne sont pas indépendantes.
+
+#### Tests de correlation
+Soient X et Y deux v.a.i.i.d. continues, on rappelle la définition de correlation:
+$\phi: corr(X,Y) = \dfrac{cov(X,Y)}{\sqrt{Var(X)Var(Y)}}$ 
+Ici on pourrait appliquer le tests de correlation de Pearson et de Kendall à nos seules deux variables continues: Age et Fare. Néanmois, pour ce faire il nous faut que les variables soient indépendantes et d'après les tests précédents on voit qu'elles ne le sont pas. Donc on ne peut pas appliquer ces tests.
+Regardons un plot de la relation de Fare et Age.
+
+```{r}
+ggplot(data = data, aes(Age,Fare)) +
+  geom_point()+
+  geom_smooth(method="lm", formula=y ~ x)+
+  labs(title="Fare en fonction de l'Age ",x="Age", y = "Fare")
+```
+
+### Partie II: Estimation
+On transforme nos données en numériques
+```{r}
+# Remplacer les points décimaux par des virgules
+# Remplacer les points décimaux par des virgules
+data[] <- lapply(data, function(x) gsub("\\.", ",", as.character(x)))
+# Convertir toutes les colonnes en numériques
+data[] <- lapply(data, as.numeric)
+sum(is.na(data))
+data <- data[, !is.na(colSums(data))]  ## supprimer les valeurs manquantes
+
+summary(data)
+data
+```
+#### Estimation par noyau
+L'estimation non paramétrique par noyau est une méthode statistique qui permet d'estimer une densité de probabilité à partir d'un échantillon de données, en utilisant une fonction de noyau pour lisser les données. "bw" est utilisé pour ajuster la largeur de bande de l'estimation. Par défaut, c'est 1.92. On utilise tous nos observations pour faire l'estimation.Le paramètre "kernel" de la fonction "density()" permet de spécifier la fonction de noyau utilisée pour l'estimation de la densité de probabilité. 
+
+Les choix courants pour la fonction de noyau sont "gaussian" (par défaut), "rectangular", "triangular", "epanechnikov", "biweight" et "cosine".
+
+```{r}
+# Calcul de la densité estimée avec noyau gaussien
+dens <- density(data$Age, kernel = "gaussian")
+
+# Observation de la structure du résultat
+str(dens)
+```
+
+
+Dans l'estimation non paramétrique par noyau, le choix de la fonction de noyau est important car elle détermine la forme de la densité de probabilité estimée. 
+
+On cherche à estimer la densité de la variable Age en utilisant plusieurs méthodes de noyau (gaussien, uniforme, triangulaire, rectangulaire et Epanechnikov). Pour ce faire, on utilise les fonctions "density" de R pour estimer la densité avec différents noyaux. 
+
+D'autre part, on définit également des fonctions (dens_r_gauss, dens_r_unif, dens_r_tri, dens_r, dens_r_epan) pour calculer la densité théorique correspondante à chaque noyau. Ensuite, on compare la densité estimée par la desitée réelle de chaque noyau et on affiche les résultats, ceci nous permet d'avoir une première idée sur quel noyau estime le mieux la densitée de la variable 
+```{r}
+# Calcul de la densité estimée avec noyau gaussien
+dens_gauss <- density(data$Age, kernel = "gaussian")
+
+# Calcul de la densité normale théorique
+dens_r_gauss <- function(x) {
+  dnorm(x, mean = mean(data$Age, na.rm = TRUE), sd = sd(data$Age, na.rm = TRUE))
+}
+
+# Estimation de la densité avec noyau uniforme
+dens_u <- density(data$Age, kernel = "rectangular")
+
+# Densité réelle correspondante au noyau uniforme
+dens_r_unif <- function(x) {
+  1/(max(data$Age) - min(data$Age))
+}
+
+
+# Estimation de la densité avec noyau triangulaire
+dens_t <- density(data$Age, kernel = "triangular")
+
+# Densité réelle correspondante au noyau triangulaire
+dtri <- function(x) {
+  ifelse(abs(x) <= 1, 1 - abs(x), 0)
+}
+dens_r_tri <- function(x) {
+  1/30 * dtri((x-22)/15)
+}
+
+# Estimation de la densité avec le noyau rectangulaire
+dens_rec <- density(data$Age, bw = "nrd", kernel = "rectangular")
+
+# Densité réelle correspondante
+drect <- function(x) {
+  ifelse(abs(x) <= 0.5, 1, 0)
+}
+dens_r <- function(x) {
+  1/15 * drect((x-22)/15)
+}
+
+
+# Estimation de la densité avec le noyau d'Epanechnikov
+dens_epan <- density(data$Age, kernel = "epanechnikov")
+
+
+# Calcul de la densité réelle avec le noyau d'Epanechnikov
+dens_r_epan <- function(x) {
+  d <- rep(0, length(x))
+  for (i in 1:length(x)) {
+    if (abs(x[i]) <= 1) {
+      d[i] <- (3/4) * (1 - x[i]^2)
+    }
+  }
+  return(d)
+}
+
+
+# Comparaison des densités
+par(mfrow=c(3,2))
+# Plot de la densité réelle et de la densité estimée avec noyau gaussien
+
+plot(dens_gauss$x, dens_gauss$y, type = "l", col = "blue", 
+     main = "Estimation de densité avec noyau gaussien",
+     xlab = "Age", ylab = "Densité")
+lines(dens_gauss$x, dens_r_gauss(dens_gauss$x), col = "red")
+legend("topright", legend = c("Densité estimée", "Densité normale"), 
+       col = c("blue", "red"), lty = 1)
+
+
+# Plot de la densité réelle et de la densité estimée avec noyau uniforme
+
+plot(dens_u$x, dens_u$y, type = "l", lwd = 2, main = "Densité réelle et estimée avec noyau uniforme", xlab = "Age", ylab = "Densité")
+curve(dnorm(x, mean(data$Age, na.rm = TRUE), sd(data$Age, na.rm = TRUE)), add = TRUE, col = "red", lwd = 2)
+legend("topright", c("Densité réelle", "Densité estimée"), lty = 1, lwd = 2, col = c("red", "black"))
+
+
+# Visualisation de l'estimation triangulaire et de la densité réelle
+
+plot(dens_t, main = "Estimation de la densité avec noyau triangulaire")
+curve(dens_r, add = TRUE, col = "red", lwd = 2)
+legend("topright", legend = c("Densité estimée", "Densité réelle"), col = c("black", "red"), lwd = 2)
+
+# Visualisation de l'estimation rectangulaire et de la densité réelle
+plot(dens_rec, main = "Estimation de la densité avec le noyau rectangulaire", xlab = "Age", ylab = "Densité", xlim = c(0, 100), ylim = c(0, 0.05))
+curve(dens_r, add = TRUE, col = "red", lty = 2, lwd = 2)
+legend("topright", legend = c("Densité estimée", "Densité réelle"), col = c("black", "red"), lty = c(1, 2), lwd = c(2, 2))
+
+
+# Visualisation de la densité réelle et estimée avec le noyau d'Epanechnikov"
+
+plot(dens_epan, main = "Estimation de densité avec le noyau d'Epanechnikov")
+curve(dens_r_epan, from = -4, to = 4, add = TRUE, col = "red")
+legend("topright", legend = c("Densité estimée", "Densité réelle"), col = c("black", "red"), lty = 1)
+
+
+```
+Du plot ci-dessus, on constate que la densité estimée, ne correspond pas à celle du noyau gaussien, ni le noyau d'Epanechnikov.D'autre part, on peut suspecter que la densité estimée est probablement celle qui correspond au noyau triangulaire ou le noyau rectangulaire.
+
+
+Pas seulement le choix du noyau est important pour estimer la densité, mais le choix de la fenêtre aussi. Dans le but de trouver la fenêtre h optimale, on estime la densité pour différentes valeurs de h et ceci pour différents noyaux, et on cheche celle qui minimise le RMSE (la racine carrée du risque quadratique moyen).
+
+Pour cela, le code divise les données en un ensemble d'entraînement et un ensemble de test, et pour chaque fonction de noyau à tester, on cherche la valeur optimale de la fenêtre.
+ 
+On affiche les valeurs optimales de la fenêtre pour chaque noyau et on plot la densité estimée avec la fenêtre optimale pour chaque noyau.
+
+
+```{r}
+# Diviser les données en ensemble d'entraînement et de test
+set.seed(123) # pour la reproductibilité
+indices <- sample(1:nrow(data), size = round(nrow(data) * 0.8))
+train_data <- data[indices, ]
+test_data <- data[-indices, ]
+
+# Liste de noyaux à tester
+kernels <- c("gaussian", "rectangular", "triangular", "epanechnikov", "biweight", "cosine")
+
+# Initialiser un vecteur pour stocker les valeurs optimales de la fenêtre h pour chaque noyau
+h_opt_vec <- numeric(length(kernels))
+
+# Initialiser une matrice pour stocker les RMSE pour chaque noyau et fenêtre
+rmse_mat <- matrix(NA, nrow = length(kernels), ncol = 30)
+
+# Initialiser un vecteur pour stocker les valeurs optimales de la fenêtre h pour chaque noyau
+h_opt_vec <- numeric(length(kernels))
+
+# Boucle pour estimer la densité avec chaque noyau et trouver la fenêtre optimale
+for (i in seq_along(kernels)) {
+  kernel_name <- kernels[i]
+  # Estimation de la densité pour les données d'entraînement
+  dens <- density(train_data$Age, kernel = kernel_name)
+  # Calcul de la densité pour les données de test pour une grille de valeurs de la fenêtre h
+  h_grid <- seq(0.1, 15, by = 0.5)
+  for (j in seq_along(h_grid)) {
+    h <- h_grid[j]
+    # Estimation de la densité avec la fenêtre h
+    dens_h <- density(train_data$Age, kernel = kernel_name, bw = h)
+    # Calcul de la densité pour les données de test avec la fenêtre h
+    test_dens_h <- approxfun(dens_h$x, dens_h$y, rule = 2)
+    # Calcul de la RMSE pour les données de test avec la fenêtre h
+    rmse <- sqrt(mean((test_dens_h(test_data$Age) - dnorm(test_data$Age, mean(test_data$Age), sd(test_data$Age)))^2))
+    # Stocker la RMSE dans la matrice rmse_mat
+    rmse_mat[i, j] <- rmse
+  }
+  # Trouver l'index de la fenêtre optimale
+  h_opt_index <- which.min(rmse_mat[i, ])
+  # Stocker la fenêtre optimale dans le vecteur h_opt_vec
+  h_opt_vec[i] <- h_grid[h_opt_index]
+  # Afficher la fenêtre optimale pour le noyau en cours
+  cat("Fenêtre optimale pour le noyau ", kernel_name, " : ", h_opt_vec[i], "\n")
+  # Estimation de la densité avec la fenêtre optimale et tracé
+  dens_opt <- density(train_data$Age, kernel = kernel_name, bw = h_opt_vec[i])
+  plot(dens_opt, main = paste0("Densité avec le noyau ", kernel_name, " et h_opt = ", h_opt_vec[i]))
+  # Afficher le RMSE de chaque noyau
+  cat(paste("RMSE pour le noyau", kernel_name, ":", round(rmse_mat[i, h_opt_index], 4), "\n"))
+}
+
+# Trouver l'index du noyau avec la plus petite RMSE
+best_kernel_index <- which.min(apply(rmse_mat, 1, mean))
+cat("\n")
+cat("Meilleur noyau :", kernels[best_kernel_index], "\n")
+
+
+```
+Donc comme prévu, le noyau rectangulaire estime le mieux la densité, dont la fenêtre optimale correspondante vaut 7.6
+
+
+
+Visualisatition de la diminution du RMSE pour atteindre son minimum au point de la fenêtre optimale pour chaque noyau.
+```{r}
+# Tracer la RMSE pour chaque noyau en fonction de la fenêtre
+par(mfrow = c(2, 3))
+for (i in seq_along(kernels)) {
+  kernel_name <- kernels[i]
+  # Tracer la RMSE pour le noyau en cours
+  plot(h_grid, rmse_mat[i, ], type = "l", xlab = "Fenêtre h", ylab = "RMSE", main = paste0("RMSE pour le noyau ", kernel_name))
+  # Tracer une ligne verticale à la position de la fenêtre optimale
+  abline(v = h_opt_vec[i], col = "red")
+}
+
+```
+
+
+Dans la suite, on peut visualiser et comparer les densités de probabilité estimées pour les données de train et de test en utilisant différents noyaux de densité et la fenêtre optimale correspondante pour chaque noyau. Donc, pour différents nombre d'échantillons,on a les mêmes résultats. 
+
+```{r}
+# Boucle pour tracer les densités estimées pour les données de test avec la fenêtre optimale pour chaque noyau
+par(mfrow = c(2, 3))
+for (i in seq_along(kernels)) {
+  kernel_name <- kernels[i]
+  # Estimation de la densité avec la fenêtre optimale
+  dens_opt <- density(train_data$Age, kernel = kernel_name, bw = h_opt_vec[i])
+  # Tracer la densité estimée pour les données de test avec la fenêtre optimale
+  plot(dens_opt, main = paste0("Densité avec le noyau ", kernel_name))
+  lines(density(test_data$Age, kernel = kernel_name, bw = h_opt_vec[i]), col = "red")
+  legend("topright", legend = c("train", "test"), col = c("black", "red"), lty = 1, cex = 0.8)
+}
+
+```
+
+
+On plot pour chaque noyau, l'estimation de la densité pour différentes fenêtres. On voit comment le choix de la fenêtre influence beaucoup les résultats et provoque des changements.
+
+```{r}
+# Les fenêtres à tester
+h_values <- c(0.5,  5, 7, 9)
+colors <- c("#3366CC", "#109618", "#FF9900", "#990099", "#EDC948", "#0099C6")
+
+
+# Tracer les densités avec différentes fenêtres pour chaque noyau
+par(mfrow = c(1, 1))
+
+for (i in seq_along(kernels)) {
+  kernel_name <- kernels[i]
+  # Estimation de la densité pour les données d'entraînement avec le noyau optimal
+  dens_opt <- density(train_data$Age, kernel = kernel_name, bw = h_opt_vec[i])
+  # Initialiser le graphique
+  plot(dens_opt, main = paste0("Densité avec le noyau ", kernel_name))
+  # Tracer la densité optimale en rouge
+  lines(dens_opt$x, dens_opt$y, col = "red", lwd = 2)
+  # Boucle pour tracer les densités avec les 6 fenêtres spécifiques
+  for (j in seq_along(h_values)) {
+    h <- h_values[j]
+    dens_h <- density(train_data$Age, kernel = kernel_name, bw = h)
+    # Tracer les autres densités avec des couleurs différentes
+    if (h != h_opt_vec[i]) {
+      lines(dens_h$x, dens_h$y, col = colors[j], lwd = 2)
+    }
+  }
+  # Ajouter une légende
+  legend("topright", legend = c(paste0("h = ", h_opt_vec[i]), paste0("h = ", h_values)), col = c("red", colors), lty = 1, cex = 0.8)
+  legend("topleft", legend = paste0("fenetre optimale "), col = "red", lty = 1, cex = 0.8, bty = "n")
+
+}
+
+
+
+```
+
+
+
+On a donc déjà vu comment la densité varie avec également le choix du noyau et le choix de la fenêtre. Mais, ,à noter que, une fois la fenêtre est correctement choisie et est celle qui minimise l'erreur, le choix du noyau n'aura pas d'influencesur les résultats. Et ce qu'on peut voir d'après les plots ci-dessous. On peut voir que, pour le choix optimal de la fenêtre, tous les noyaux donnent la même estimation.
+
+
+En conclusion donc, le choix optimal de la fenêtre est crucial pour avoir la bonne estimation.
+
+```{r}
+# Tracer les densités avec différents noyaux pour chaque fenêtre optimale
+par(mfrow = c(2, 3))
+for (i in seq_along(h_opt_vec)) {
+  h_opt <- h_opt_vec[i]
+  # Estimation de la densité pour les données d'entraînement avec la fenêtre optimale
+  dens_opt <- density(train_data$Age, kernel = kernels[best_kernel_index], bw = h_opt)
+  # Initialiser le graphique
+  plot(dens_opt, main = paste0("Densité avec h_opt = ", h_opt))
+  # Boucle pour tracer les densités avec différents noyaux
+  for (j in seq_along(kernels)) {
+    kernel_name <- kernels[j]
+    dens_k <- density(train_data$Age, kernel = kernel_name, bw = h_opt)
+    lines(dens_k$x, dens_k$y, col = colors[j])
+  }
+  legend("topright", legend = kernels, col = colors, lty = 1, cex = 0.8)
+}
+
+```
+On passe à une deuxième méthode pour estimer la densité.
+
+
+#### Estimation de la densité par histogramme
+
+Le plus important dans cette méthode est le choix du nombre de classes D. On fait varier D, d'après les plots on voit comment la distribution des observations change d'une valeur de D à l'autre.
+
+```{r}
+par(mfrow=c(2,2))
+for(D in c(5,15,50,100)){
+  fhat <-hist(data$Age,D,freq=F,col='red')$density
+}
+```
+On veut tracer un histogramme en effectifs et en probabilités des observations
+
+Dans l'histogramme en effectifs, l'axe des ordonnées représente le nombre d'observations qui appartiennent à chaque intervalle de la variable continue. Dans l'histogramme en probabilités, l'axe des ordonnées représente la densité de probabilité de chaque intervalle, c'est-à-dire la probabilité que la variable continue prenne une valeur dans cet intervalle.
+
+La différence entre les deux est que l'histogramme en effectifs permet de visualiser la répartition de la variable continue en nombre d'observations, tandis que l'histogramme en probabilités permet de visualiser la répartition en termes de densité de probabilité, ce qui facilite la comparaison entre des distributions ayant des unités différentes.
+```{r}
+# Tracer un histogramme en effectifs
+his = hist(data$Age, freq = TRUE, main = "Histogramme des âges (effectifs)") ## le nombre de bins utilisé par défaut est de 10.
+his$density # elle correspond à la densité de probabilité estimée de la distribution des âges.
+# Tracer un histogramme en probabilités
+hist(data$Age, freq = FALSE, main = "Histogramme des âges (probabilités)")
+
+```
+Faisons le plot pour différents valeurs de D:
+
+```{r}
+for(D in c(5,25,40,50,70,85,100)){
+  hist(data$Age,D,freq = FALSE) #histogramme en densité de probabilité
+  fhat <- hist(data$Age,D,freq=FALSE)$density
+}
+```
+En observant les différents histogrammes obtenus pour différentes valeurs de D, on peut voir que la densité estimée par l'histogramme dépend du nombre de classes choisi. Un nombre de classes plus élevé peut réduire le biais de l'estimation, car cela permet de mieux capturer les détails de la distribution. Cependant, cela peut également augmenter la variance de l'estimation, car l'estimation est plus sensible aux fluctuations locales des données. D'un autre côté, un nombre de classes plus faible peut augmenter le biais de l'estimation, car les détails de la distribution ne sont pas correctement capturés. Cependant, cela peut réduire la variance de l'estimation, car l'estimation est moins sensible aux fluctuations locales des données.
+
+Le choix de D dans l'estimation de densité doit donc faire un compromis entre le biais et la variance de l'estimateur de la densité.
+
+On plot ici, pour différentes valeurs de D, la densité éstimée par la méthode de noyau, pour la fenetre optimale et le meilleur noyau, qui est le noyau rectangular. En examinant les différents plots, on peut supposer que le meilleur D est entre 5 et 10.
+```{r}
+# Boucle sur différentes valeurs de classes
+for(D in c(5, 10, 30,75, 100, 150)){
+  # Tracé de l'histogramme
+  hist(data$Age, breaks = D, freq = FALSE, main = paste("Histogramme (D =", D, ")"), xlab = "Age", ylim = c(0, 0.03))
+  
+  # Calcul de la densité estimée avec noyau rectangulaire
+  dens_rect <- density(data$Age, kernel = "rectangular", bw = 7.6)
+  
+  # Superposition de la densité estimée sur l'histogramme
+  lines(dens_rect, col = "green")
+}
+
+
+```
+
+On utilise la fonction rug() qui permet de tracer un petit trait vertical pour chaque observation le long de l'axe de la variable dans le graphique d'histogramme. Ces traits permettent de visualiser l'emplacement des données sur l'axe de la variable. On voit donc que la majorité des observations se situent entre 0 et 60, et une minorité entre 60 et 80, ce qui est logique pour une variable d'age.
+
+
+```{r}
+# Déterminer la plage de valeurs de data$Age
+range_Age <- range(data$Age)
+
+# Créer un vecteur breaks couvrant toute la plage de valeurs
+breaks <- seq(range_Age[1], range_Age[2], length.out = 6)
+
+# Créer un histogramme avec rug
+hist(data$Age, breaks = breaks, freq = FALSE, main = "Histogramme des âges (probabilités)")
+rug(data$Age)
+
+```
+
+Dans la suite on utilise la fonction truehist, elle est similaire à la fonction "hist" mais elle utilise une méthode de lissage de la densité différente. La fonction truehist() utilise une implémentation optimisée de la méthode du noyau pour produire des estimations de densité de haute qualité.Cette méthode est plus précise que la méthode utilisée par défaut dans "hist" et permet de mieux visualiser la forme de la distribution sous-jacente des données. 
+
+ Elle utilise donc un algorithme pour optimiser la largeur de bande de noyau, ce qui peut améliorer la précision de l'estimation de la densité.
+
+```{r}
+library(MASS)
+
+par(mfrow=c(1,2)) # fenêtre graphique coupée en deux
+# Estimation de la densité par noyau rectangular avec fenêtre 7.6
+dens_rect <- density(data$Age, kernel = "rectangular", bw = 7.6)
+
+# Histogramme avec la fonction hist et repères unidimensionnels
+hist(data$Age, main = "Histogramme des âges (probabilités)", freq = FALSE)
+rug(data$Age)
+# Densité estimée par noyau rectangular avec fenêtre 7.6
+lines(dens_rect$x, dens_rect$y, col = "green")
+
+# Histogramme avec la fonction truehist et options de couleur et d'ajustement de l'échelle
+truehist(data$Age, main = "Histogramme des âges (probabilités)", col = "blue", ylim = c(0, 0.05))
+rug(data$Age)
+# Densité estimée par noyau rectangular avec fenêtre 7.6
+lines(dens_rect$x, dens_rect$y, col = "green")
+
+```
+
+On cherche à trouver le D optimal qui minimise le risque quadratique. Pour cela, on calcule le biais et la variance, et on compare la densité éstimée par l'histogramme à celle optimale qu'on a trouvé par la méthode de noyau (noyan rectangulaire et fenetre 7.6). On calcul le risque quadratique pour chaque valeur de D puis on  cherche celle qui le minimise. On trouve que le nombre de classes optimal vaut 10. On nplot l'histogramme pour cette valeur et d'autres valeurs de D pour faire une comparaison visuelle.
+
+```{r}
+# Vecteur des largeurs de bande à tester (séquence logarithmique)
+
+D_vec <- 10^seq(1, 2, by = 0.25)
+
+# Initialiser les vecteurs de biais, de variance et de risque quadratique moyen
+
+bias_vec <- rep(0, length(D_vec))
+var_vec <- rep(0, length(D_vec))
+risk_vec <- rep(0, length(D_vec))
+
+# Estimation de la densité avec une fenêtre de bande fixe
+truedensity <- density(data$Age, kernel = "rectangular", bw = 7.6)
+
+# Boucle pour calculer le biais, la variance et le risque pour chaque largeur de bande
+for (i in seq_along(D_vec)) {
+  D <- D_vec[i]
+  # Estimation de la densité par histogramme
+  dens_hist <- hist(train_data$Age, breaks = D, plot = FALSE)
+  # Calcul du biais au carré
+  bias_vec[i] <- sum((dens_hist$density - truedensity$density[dens_hist$mids])^2 * dens_hist$dx)
+  # Calcul de la variance
+  var_vec[i] <- sum(dens_hist$density^2 * dens_hist$dx) - sum(dens_hist$density * dens_hist$dx)^2
+  # Calcul du risque quadratique moyen
+  risk_vec[i] <- bias_vec[i] + var_vec[i]
+}
+
+# Trouver la largeur de bande qui minimise le risque quadratique moyen
+opt_D <- D_vec[which.min(risk_vec)]
+print(opt_D)
+
+# Tracer les estimations de densité pour la largeur de bande optimale et quelques autres valeurs de D
+par(mfrow = c(2, 3))
+
+for (i in seq_along(c(opt_D,  opt_D + 1, opt_D + 2, opt_D + 3))) {
+  D <- D_vec[i]
+  dens_hist <- hist(train_data$Age, breaks = D, plot = FALSE)
+  plot(dens_hist$mids, dens_hist$density, type = "s", main = paste0("Histogramme, D = ", D))
+}
+
+
+```
+
+On superpose la densité éstimée par noyau et par histogramme pour le nombre de classes optimal(10) et la fenetre optimale (7.6).
+
+```{r}
+# Estimation de la densité par noyau rectangular avec fenêtre 7.6
+dens_rect <- density(data$Age, kernel = "rectangular", bw = 7.6)
+
+# Histogramme avec la fonction hist et repères unidimensionnels
+hist(data$Age, breaks=10, main = "Histogramme des âges (probabilités)", freq = FALSE)
+rug(data$Age)
+# Densité estimée par noyau rectangular avec fenêtre 7.6
+lines(dens_rect$x, dens_rect$y, col = "green")
+
+```
+
+
+
+### Partie III: Regression
+Dans cette partie, on s'intéresse à faire une régression pour expliquer la variable de survie possédent deux classes (0 et 1) en fonction ndes variables restantes. Dans ce but, on applique le glm pour voir quelles variables sont les plus significatives.
+
+```{r}
+# On applique un modèle de régression logistique
+data$NewSex <- ifelse(data$Sex == 0, 7, 8)
+data$NewSex
+model <- glm(Survived ~ ., data = data, family = "binomial")
+# Résumé du modèle
+summary(model)
+```
+ Les étoiles indiquent le niveau de significativité : trois étoiles signifient une p-value inférieure à 0,001, deux étoiles signifient une p-value inférieure à 0,01 et une étoile signifie une p-value inférieure à 0,05. 
+ 
+ Dans notre cas, toutes les variables ont des p-values inférieures à 0,05, sauf PassengerId et Parch qui ont des p-values supérieures à 0,05. Cela signifie que ces deux variables ne sont pas significativement associées à la variable de sortie Survived. Par conséquent, si on veut réduire le nombre de variables dans notre modèle, on peut envisager de ne pas inclure PassengerId et Parch.
+ 
+ La fonction de régression est:
+
+$$\hat{y} = 30.82 - 0.93Pclass - 3.75Sex - 0.01Age - 0.26SibSp $$
+
+où 
+
+où $\hat{y}$ représente la prédiction de Survived, $x_1$ la variable explicative "PassengerId", $x_2$ la variable explicative "Pclass", $x_3$ la variable explicative "Age", $x_4$ la variable explicative "SibSp", $x_5$ la variable explicative "Parch" et $x_6$ la variable explicative "Embarked".
+
+
+```{r}
+#install.packages("coefplot")
+library(coefplot)
+coefplot(model)
+
+```
+On remarque que Sex et Pclass expliquent le mieux la variable survived, leur coefficients sont loins de 0, donc significatives. De meme, la variable age est significative, meme si pas autant que les autres. 
+
+
+Pour les estimations qui suivent, Vue qu'on a fait presque toute les études sur la variable Age, on décide de continuer avec elle.
+
+La fonction de régression sera alors:
+
+$$f{y} = \frac{1}{1+e^{-(30.82 - 0.01Age)}}$$
+On trace la vraie fonction de régression ainsi que le nuage de points pour plusieurs valeurs
+de n.
+```{r}
+grid_x <- function(n) {
+  seq.int(1,n)/n
+}
+
+vector_f <- function(n) {
+  x = grid_x(n)
+  X = cbind(rep(1,n),  x^2, x^3)
+  beta = c(30.82, -0.93, -3.75)
+  X %*% beta
+}
+
+N=nrow(data)
+
+f_N <- vector_f(N)
+x_N <- grid_x(N)
+f_df_N <-  data.frame(x = x_N, f = f_N)
+
+ggplot(data = f_df_N, aes(x = x, y = f)) + geom_line(color = "red", linewidth= 2)
+
+
+```
+En nutilisant des modèles de régression linéaires pour des polynômes de degré différents,
+on construit des estimateurs de la vraie fonction de régression.
+On commence par un polynole de degré 5. On plot en rouge la densité estimé et en  pointillés les données.
+
+```{r}
+mod4 <- lm(Survived ~ poly(Age, 5, raw = TRUE), data = data)
+x_N <- seq(min(data$Age), max(data$Age), length.out = 100)
+pred4_N <- predict(mod4, newdata = data.frame(Age = x_N))
+pred4_df_N <- data.frame(x = x_N, pred = pred4_N)
+library(ggplot2)
+
+# Créer un nuage de points avec la variable Sex et Survived
+ggplot(data, aes(x = Age, y = Survived)) +
+  geom_point() +
+  # Ajouter la courbe de prédiction pour le modèle mod4
+  geom_line(data = pred4_df_N, aes(x = x, y = pred), color = "red", size = 1.2) +
+  # Définir les étiquettes des axes
+  labs(x = "Age", y = "Survived")
+```
+
+Notre but maintenant est de chercher le degré qui approche au mieux la vrai fonction de regression. Pour cela, on considère des polynomesde différents degrés, et d'après le plot, on cherche à mettre une hypothèse sur la valeur possible du degré du polynome. 
+```{r}
+library(gridExtra)
+
+# Créer une liste pour stocker les graphiques générés
+plots <- list()
+
+# Définir les degrés de polynômes à tester
+poly_degrees <- c(1,2, 3, 4, 5, 6, 7, 8, 9, 10)
+
+# Parcourir chaque degré de polynôme et générer le graphique correspondant
+for (i in poly_degrees) {
+  # Ajuster le modèle de régression linéaire
+  mod <- lm(Survived ~ poly(Age, i, raw = TRUE), data = data)
+  
+  # Générer les valeurs prédites pour une plage de valeurs de la variable Age
+  x_N <- seq(min(data$Age), max(data$Age), length.out = 100)
+  pred_N <- predict(mod, newdata = data.frame(Age = x_N))
+  
+  # Créer un data frame avec les valeurs prédites
+  pred_df_N <- data.frame(x = x_N, pred = pred_N)
+  
+  # Tracer la courbe de prédiction et ajouter le titre correspondant
+  plot <- ggplot(data, aes(x = Age, y = Survived)) +
+    geom_point() +
+    geom_line(data = pred_df_N, aes(x = x, y = pred), color = "red", size = 1.2) +
+    labs(x = "Age", y = "Survived", title = paste("Polynomial degree =", i)) +
+    theme(plot.title = element_text(hjust = 0.5))
+  
+  # Ajouter le graphique à la liste
+  plots[[i]] <- plot
+}
+
+# Utiliser grid.arrange pour afficher tous les graphiques sur une seule page
+grid.arrange(grobs = plots, ncol = 3)
+
+
+```
+
+
+
+On utilise maintenant la fonction npreg du package np pour estimer la fonction de régression de Survived en fonction de Age en utilisant l'estimateur à noyau Nadaraya-Watson. La fonction npreg renvoie un objet contenant diverses informations sur l'estimation, notamment la fonction de régression estimée aux points spécifiés dans l'argument exdat. On plot cette fonction de régression estimée pour une plage de valeurs d'Age.
+
+```{r}
+
+library(np)
+
+# Estimation de la fonction de régression avec l'estimateur à noyau Nadaraya-Watson
+mod.ker <- npreg(Survived ~ Age, data = data)
+
+# Affichage des variables fournies par npreg
+names(mod.ker)
+
+# Estimation de la fonction de régression pour une plage de valeurs de Age
+x0 <- seq(min(data$Age), max(data$Age), length = 1000)
+mod.kern <- npreg(Survived ~ Age, data = data, exdat = x0)
+rhat <- mod.kern$mean
+
+# Tracé de la fonction de régression estimée
+plot(data$Age, data$Survived)
+lines(x0, rhat, col = "red")
+
+
+```
+On passe maintenant à l'estimation en utilisant la fonction ksmooth. C'est une fonction qui utilise une approche de lissage non-paramétrique pour estimer une fonction de densité de probabilité à partir d'un échantillon de données brutes. Elle effectue cela en appliquant un noyau à chaque point de données dans l'échantillon, puis en prenant une moyenne pondérée des points voisins.
+Elle permet de régler plusieurs paramètres, notamment la largeur du noyau, qui peut être utilisée pour contrôler le degré de lissage, et le choix du type de noyau, qui peut affecter la forme de la courbe lissée.
+
+Les fonctions ksmooth et density diffèrent dans leur approche et leur résultat final.
+
+La fonction density est utilisée pour estimer une densité de probabilité à partir d'un échantillon de données brutes en utilisant une méthode de lissage par noyau. La densité de probabilité estimée est une fonction continue qui peut être utilisée pour approximer la distribution de probabilité sous-jacente de l'échantillon de données.
+
+En revanche, la fonction ksmooth est utilisée pour lissage de courbe. Elle estime une courbe lissée à partir d'un échantillon de données brutes en utilisant une méthode de lissage par noyau. Cette courbe lissée peut être utilisée pour visualiser les tendances ou les motifs dans les données, mais elle ne fournit pas une estimation directe de la densité de probabilité sous-jacente de l'échantillon de données.
+
+
+```{r}
+
+Y <- data$Survived
+X <- data$Age
+
+# Plot de la courbe lissée pour différentes valeurs de la fenêtre
+par(mfrow=c(3,3)) # division de la fenêtre graphique en 9 sous-fenêtres
+for(h in seq(0.1,10, length.out=9)) {
+  y_smooth <- ksmooth(X, Y, kernel="normal", bandwidth=h)$y
+  plot(X, Y)
+  lines(X, y_smooth, col="red")
+  title(paste("h =", round(h, 2)))
+}
+```
+
+Dans la suite, on cherche à trouver la  fenêtre optimale qui minimise le risque quadratique moyen. Elle vaut 0.24 .
+```{r}
+# Calcul de l'erreur pour différentes valeurs de la fenêtre
+h_seq <- seq(0.1, 1, length.out=100)
+mse_vec <- rep(0, length(h_seq))
+for (i in 1:length(h_seq)) {
+  y_pred <- ksmooth(X, Y, kernel="normal", bandwidth=h_seq[i])$y
+  mse_vec[i] <- mean((Y[!is.na(y_pred)] - y_pred[!is.na(y_pred)])^2)
+}
+
+# Trouver la fenêtre optimale qui minimise l'erreur
+h_opt <- h_seq[which.min(mse_vec)]
+cat("La fenêtre optimale est", round(h_opt, 2), "\n")
+```
+
+Du graphique de l'erreur, on npeut voir que le choix optimal de la fenêtre est important.
+```{r}
+# Plot de l'erreur en fonction de la fenêtre
+plot(h_seq, mse_vec, type="l", xlab="h", ylab="Erreur")
+abline(v=h_opt, lty=2, col="red")
+
+```
+
+On passe maintenant à l'estimation par spline.  C'est une méthode d'ajustement de courbes ou de surfaces à des données brutes. Cette méthode consiste à estimer une fonction lisse à partir de points de données en utilisant des polynômes locaux ou des morceaux de polynômes. Cette approche de lissage permet de limiter les oscillations et les bruits dans les données, tout en préservant les caractéristiques importantes de la courbe.
+
+La fonction smooth.spline est une fonction qui permet d'effectuer une estimation de courbe par spline. Cette fonction utilise une approche de lissage par spline pour estimer une courbe lisse à partir d'un échantillon de données brutes.
+
+le paramètre "df" représente le nombre de degrés de liberté pour le lissage par spline. Il contrôle le niveau de lissage de la courbe en déterminant le nombre de nœuds ou de points d'ancrage à utiliser dans l'estimation. Un df plus élevé signifie que plus de nœuds seront utilisés, ce qui peut conduire à une courbe plus flexible et plus proche des données brutes. En revanche, un df plus faible signifie que moins de nœuds seront utilisés, ce qui peut conduire à une courbe plus lisse et plus simple.
+
+```{r}
+
+# Estimation de la courbe de régression avec smooth.spline
+regr_spline <- smooth.spline(data$Age, data$Survived, df=5)
+regr_spline
+str(regr_spline)
+regr_spline$fit$knot
+
+```
+```{r}
+plot(data$Age, data$Survived, xlab="Age", ylab="Survie")
+lines(regr_spline,col = "blue")
+```
+Dans le but de trouver le df optimal, on considère plusieurs valeurs de df, puis on fait l'estimation par spline. Ensuite,on calcul pour chaque valeur de df l'erreur quadratique moyenne, et la valeur minimaleest l'optimale.
+
+D'autre part,on plot la variation de l'erreur en fonction des valeurs de df, on voit comment le choix de df est important.
+
+```{r}
+# vecteur de degrés de liberté à tester
+df_seq <- seq(1, 75, by=5)
+
+# vecteur pour stocker les erreurs quadratiques moyennes
+mse_vec <- numeric(length(df_seq))
+
+# tracer la courbe de régression pour chaque valeur de df
+par(mfrow=c(3,3))
+for (i in 1:length(df_seq)) {
+  regr_spline <- smooth.spline(data$Age, data$Survived, df=df_seq[i])
+  plot(data$Age, data$Survived, xlab="Age", ylab="Survie")
+  lines(regr_spline, col="blue")
+  title(paste("df=", df_seq[i]))
+  
+  # calculer l'erreur quadratique moyenne
+  y_pred <- predict(regr_spline, data$Age)
+  mse_vec[i] <- mean((data$Survived - unlist(y_pred))^2)
+}
+
+
+# tracer la courbe d'erreur quadratique moyenne en fonction de df
+plot(df_seq, mse_vec, type="b", pch=20, col="red", xlab="df", ylab="Erreur quadratique moyenne")
+```
+
+
+```{r}
+# trouver le df optimal qui minimise l'erreur quadratique moyenne
+df_opt <- df_seq[which.min(mse_vec)]
+cat("df optimal:", df_opt, "\n")
+
+```
+
+
+On plot l'estimation pour la valeur optimal.
+```{r}
+regr_spline <- smooth.spline(data$Age, data$Survived, df=61)
+plot(data$Age, data$Survived, xlab="Age", ylab="Survie")
+lines(regr_spline,col = "blue")
+```
+
+
+
+Ensuite on fait une regression avec des polynomes locaux. On a deux fonctions R: lowess(), pour le cas de regression simple, et loess() por le cas général.
+Comme la plupart des données qu'on peut utiliser pour la regression sont ordinales, on utilise la fonction histSpikeg qui nous permet de rajouter et visualiser la regression lowess ainsi que visualiser la fréquence des occurances par bloque.
+Dans ce premier cas, on visualise la probabilité de survie par age (lignes verticales en noir) et la regression lowess (courbe noire). Dans ce première graphe on utilise aussi la fonction stat_smooth qui nous permet de visualiser la regression loess (ligne bleue).
+On observe que les deux courbes sont assez differentes et que celle de lowess s'approche plus des observations.
+
+```{r}
+ggplot(data, aes(x=Age, y=Survived)) + 
+  histSpikeg(Survived ~ Age, lowess=TRUE, data=data) + 
+  ylim(0,1) + ylab("Proabilité de survie") +
+  stat_smooth(method="loess", formula=y~x, alpha=0.2, size=1)
+```
+Pour cette graphe on rajoute la variable Sex en régroupant par couleurs les regressions lowess. On rappelle que 0 correspond aux femmes et 1 correspond aux hommes. Comme pour le graphe précédent, on peut voir aussi les observations. Des resultats on conclut que les femmes ont une probabilité plus grande de survivre, ce qui a du sense si on considère que les femmes étaient privilegiés de monder dans les bateaux de sauvetage.
+```{r}
+ggplot(data, aes(x=Age, y=Survived, color=Sex)) +
+      histSpikeg(Survived ~ Age + Sex, lowess=TRUE,
+                 data=data) + ylim(0,1) + ylab("Proabilité de survie")
+```
+Ici on fait la regression lowess en regroupant par Pclass
+```{r}
+ggplot(data, aes(x=Age, y=Survived, color=Pclass)) +
+      histSpikeg(Survived ~ Age + Pclass, lowess=TRUE,
+                 data=data) + scale_size_discrete(range=c(.1, .85)) + ylim(0,1) + ylab("Proabilité de survie")
+```
+Et finalement on fait la regression en regroupant par Pclass et Sex.
+```{r}
+ggplot(data, aes(x=Age, y=Survived, color=Sex,
+       size=Pclass)) +
+      histSpikeg(Survived ~ Age + Sex + Pclass,
+                 lowess=TRUE, data=data) +
+      scale_size_discrete(range=c(.2, 1)) + ylim(0,1) + ylab("Proabilité de survie")
+```
